@@ -16,8 +16,28 @@ import { copyFileSync, mkdirSync, readFileSync, statSync, unlinkSync } from 'nod
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 
-const outDir = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
+const rawOutDir = process.env.MAKEFUN_OUTPUT_DIR;
+// An empty or whitespace-only MAKEFUN_OUTPUT_DIR must fall back to the
+// default: `??` alone would keep '' and join('', 'entry.png') would drop
+// the file in the working directory instead of /output.
+const outDir = rawOutDir?.trim() ? rawOutDir.trim() : '/output';
 const source = new URL('./entry.png', import.meta.url);
+
+// Fail fast on a bad source: if entry.png is missing or not a PNG, say so
+// here instead of copying garbage and failing later on the delivered copy.
+let sourceStat;
+try {
+  sourceStat = statSync(source);
+} catch (err) {
+  throw new Error(`entry.png missing next to main.ts: ${err.message}`);
+}
+if (sourceStat.size === 0) {
+  throw new Error('entry.png is empty');
+}
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+if (!readFileSync(source).subarray(0, 8).equals(PNG_SIGNATURE)) {
+  throw new Error('entry.png is not a PNG: bad signature bytes in source');
+}
 
 // The grader's output directory may not exist yet — create it so the
 // copy never fails on a missing folder.
@@ -37,7 +57,6 @@ copyFileSync(source, target);
 // The gate tells a PNG apart by its first bytes — confirm the delivered
 // copy starts with the PNG signature before the hash check, so a
 // same-length non-PNG could never pass as the entry.
-const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const deliveredHead = readFileSync(target).subarray(0, 8);
 if (!deliveredHead.equals(PNG_SIGNATURE)) {
   throw new Error('entry.png is not a PNG: bad signature bytes');
